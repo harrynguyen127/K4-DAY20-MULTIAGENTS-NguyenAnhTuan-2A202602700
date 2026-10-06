@@ -1,103 +1,143 @@
-# Báo cáo Lab: Self evolving Agentic
-
-> Sao chép tệp này thành `report/REPORT.md` (đã làm ở Phần 0) và điền dần qua các Phần của lab. Xóa các dòng hướng dẫn dạng trích dẫn (bắt đầu bằng `>`). Văn phong kỹ thuật, ngắn gọn, mọi nhận định đi kèm số liệu hoặc bằng chứng. Trong buổi học: điền mục 1 đến 7 (bản nháp). Sau buổi học: hoàn thiện mục 8 đến 10.
+# Báo cáo Lab: Self-evolving Agentic
 
 ## 1. Thông tin nhóm và cấu hình
 
 | Họ tên | Mã sinh viên | Phần đóng góp |
 |---|---|---|
-| Nguyễn Anh Tuấn | 2A202602700 | Toàn bộ các phần|
+| Nguyễn Anh Tuấn | 2A202602700 | Toàn bộ các phần |
 
-- Mô hình: `LAB_MODEL=deepseek:deepseek-chat`, `LAB_TEMPERATURE=0`, `recursion_limit=60`.
-- Deep Agents: `deepagents==0.7.21`, hệ điều hành `Windows 10`, chạy trực tiếp trên máy local (không dùng Docker).
-- Số lần chạy tác vụ đã dùng / ngân sách: đã chạy các lần baseline/subagents/skills-auto trên các tác vụ học, tổng khoảng hàng trăm nghìn token; hiện tại còn gặp lỗi `GraphRecursionError` ở các lần chạy có mô hình DeepSeek trong điều kiện phức tạp.
-- Commit của tag `freeze`: chưa thực hiện do chưa chạy đủ bước đóng băng của lab; report này là bản nháp dựa trên dữ liệu có sẵn.
+- Mô hình: `LAB_MODEL=deepseek:deepseek-chat`, `LAB_TEMPERATURE=0`, `recursion_limit` chủ yếu là `60` (một số lần chạy lại dùng `20` để chặn lặp vô hạn).
+- Deep Agents: `deepagents==0.7.21`, hệ điều hành Windows, chạy local.
+- Tổng token của 18 run chính thức sau khi hoàn thiện ma trận kết quả: xấp xỉ **7,009,668** token.
+- Mốc đóng băng:
+  - Commit giả thuyết: `878d816` (`hypotheses`)
+  - Tag đóng băng: `freeze` tại commit `2bee870`
+  - Kiểm tra bằng `python -X utf8 scripts/verify_freeze.py`: **OK**
 
-## 2. Giả thuyết (commit TRƯỚC tag `freeze`, Phần 4.0)
+## 2. Giả thuyết (commit trước tag `freeze`)
 
-- H1 (subagents so với baseline): Subagents sẽ cải thiện score trên tác vụ học ở các bước cần đọc/spec và chạy kiểm tra, nhưng không chắc cải thiện ổn định vì chi phí token tăng mạnh và mô hình có xu hướng lặp vô hạn khi giao việc phức tạp.
-- H2 (skills-auto so với baseline): Skills-auto sẽ giúp cải thiện các check quy tắc thực thi và tài liệu/metadata, vì curator rút ra được các skill về `repo-rule-compliance`, `required-output-artifacts`, `output-normalization-and-schema` từ các lỗi lặp lại.
-- H3 (tác vụ học so với tác vụ đánh giá): Tác vụ học dễ hơn đánh giá vì dữ liệu học có thể đọc được và lỗi chủ yếu là quy tắc, trong khi tác vụ đánh giá thêm quy tắc mới hoặc định dạng ẩn nên dễ hơn nhiều so với baseline nếu mô hình không đọc kỹ.
+- **H1** (subagents so với baseline): subagents có thể tăng điểm ở tác vụ học khi cần chia nhỏ công việc, nhưng có rủi ro tăng token mạnh và không ổn định vì vòng lặp hội thoại.
+- **H2** (skills-auto so với baseline): skills-auto dự kiến cải thiện nhóm check quy ước/định dạng đầu ra (`rule_*`) vì curator rút kinh nghiệm từ lỗi lặp lại.
+- **H3** (học so với đánh giá): chênh lệch học–đánh giá sẽ cho thấy dấu hiệu tổng quát hóa; nếu chỉ tăng ở học mà không tăng ở đánh giá thì có khả năng overfit theo tập lỗi đã thấy.
 
 ## 3. Làm quen Deep Agents (Phần 0.3)
 
-1. Tác tử mặc định có các công cụ tệp `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`; shell `execute`; subagent `task`.
-2. Mô tả `task` nêu rõ: `general-purpose` là subagent dùng cho tìm kiếm, nghiên cứu và thực hiện multi-step tasks; nó chỉ nhìn thấy prompt được gởi đi và không thừa hưởng toàn bộ hội thoại trừ khi tài liệu mô tả khác.
-3. System prompt mặc định rỗng. Một câu hướng dẫn hành vi từ `task`: “Launch an ephemeral subagent to handle a complex, multi-step task.” Một câu từ `execute`: “Use absolute paths and avoid `cd` so the working directory stays stable...”
+1. Tác tử mặc định có các công cụ: `ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`, `task`.
+2. `task` mô tả `general-purpose` là subagent cho công việc nhiều bước; subagent chỉ nhận ngữ cảnh được truyền qua prompt (không tự động thừa hưởng toàn bộ lịch sử chính).
+3. System prompt mặc định rỗng. Ví dụ câu hướng dẫn:
+   - Từ `task`: “Launch an ephemeral subagent to handle a complex, multi-step task.”
+   - Từ `execute`: “Use absolute paths and avoid `cd` so the working directory stays stable...”
 
 ## 4. Đường cơ sở và phân loại lỗi (Phần 2.2)
 
-| Tác vụ | Check thất bại | Nhóm lỗi (A-G) | Bằng chứng (trích ngắn từ `detail` hoặc vết) |
+| Tác vụ | Check thất bại | Nhóm lỗi (A-G) | Bằng chứng ngắn |
 |---|---|---|---|
-| code-learn | `rule_type_hints` | E | `RULE: every public function ... has type annotations...` |
+| code-learn | `tests_not_modified` | B | Chỉnh vào test gốc: “the original files in tests/ must not be modified...” |
+| code-learn | `rule_type_hints` | E | `RULE: every public function ... has type annotations ...` |
 | code-learn | `rule_regression_tests` | E | `RULE: add tests/test_regressions.py ...` |
 | code-learn | `rule_changelog` | E | `RULE: record each fix in CHANGELOG.md ...` |
-| data-learn | `rule_clean_csv` | D | `RULE: write workspace/clean.csv ... one row per distinct order ...` |
-| data-learn | `rule_money_in_cents` | D | `RULE: money values in answer.json are integer cents ...` |
-| logs-learn | `rule_service_names` | E | `RULE: service names in the output are lower-case ...` |
-| logs-learn | `rule_sorted_errors` | E | `RULE: errors is sorted by service, then by timestamp_utc, ascending.` |
-| logs-learn | `rule_schema_header` | E | `RULE: the top-level object has "schema_version": 2 and "generated_by": "log-triage".` |
+| data-learn | 7 check đọc `answer.json` lỗi `FileNotFoundError` | G | Không sinh ra `workspace/answer.json` do run bị lỗi vòng lặp |
+| data-learn | `rule_clean_csv` | E | `RULE: write workspace/clean.csv ...` |
+| logs-learn | `rule_service_names` | E | `RULE: service names ... lower-case ...` |
+| logs-learn | `rule_sorted_errors` | E | `RULE: errors is sorted by service ...` |
+| logs-learn | `rule_schema_header` | E | `RULE: schema_version = 2, generated_by = log-triage` |
 
-Nhận xét: lỗi quy ước (`E`) chiếm đa số trong dữ liệu học hiện có. Đây là vùng mà skill có thể phòng ngừa tốt vì các lỗi này lặp lại ở dạng “thiếu metadata / schema / checklist” chứ không phải là bug logic cốt lõi. Các lỗi kiểu `A-D` về đọc spec hoặc dữ liệu bẩn xuất hiện ít hơn và thường được mô hình xử lý khá tốt hơn khi có câu hỏi rõ ràng.
+Nhận xét:
+- Lỗi **E (vi phạm quy ước)** là nhóm nổi trội ở baseline.
+- Số liệu phủ định cho A-D: theo `scripts/check_breakdown.py`, baseline/learn đạt **12/18 check kỹ thuật**, cho thấy phần lớn lỗi không nằm ở năng lực code cốt lõi mà ở checklist quy ước và artifact.
 
 ## 5. Điều kiện `subagents` (Phần 2.3)
 
-- Các subagent đã định nghĩa: `explorer`, `implementer`, `reviewer`.
-- `subagent_calls` ở từng tác vụ: `data-learn` trong điều kiện subagents có `subagent_calls = 0` trên lần chạy thu được; `code-learn` ở lần chạy khác cũng cho thấy `subagent_calls = 0` và bị `GraphRecursionError` nên không có bằng chứng rõ ràng rằng subagent được dùng.
-- Thông tin thiếu hoặc thừa khi giao việc: do tài liệu phụ, task chính đã nêu đủ, nhưng tác tử chủ đạo không cần phải delegate nên các subagent phần lớn không được gọi. Điều này cho thấy hành vi “tự làm” chiếm ưu thế khi mô hình chưa có động lực hay kỹ thuật phân tách công việc.
-- Ảnh hưởng đến token và thời gian: khi subagents không được gọi, chi phí token thấp hơn nhưng không đổi được chất lượng; khi subagent có gọi, token tăng rất mạnh ở `code-learn` (vượt 1.3M input token ở lần chạy subagents), cho thấy phương án này rất tốn kém dù không đảm bảo cải thiện đáng kể.
+- `subagent_calls` trong 6 task:
+  - `code-learn=0`, `data-learn=0`, `logs-learn=1`, `code-eval=0`, `data-eval=0`, `logs-eval=0`.
+- Quan sát: phần lớn run không giao việc; tác tử chính chủ yếu tự xử lý.
+- Với run có giao việc (`logs-learn`), hiệu quả điểm không vượt baseline (đều 6/9), nhưng token tăng đáng kể.
+- So với baseline:
+  - Mean tokens/run: **514,675** (subagents) vs **302,538** (baseline).
+  - Mean score eval: **0.38** (subagents) vs **0.57** (baseline).
+  => Trong thí nghiệm này, cấu hình đa tác tử không hiệu quả về chi phí/điểm.
 
 ## 6. Self-evolving: skill do curator sinh (Phần 3)
 
-- Số lần chạy curator: 1 lần.
-- Số skill bị xóa: 0; các skill sinh ra hợp lệ về tên/frontmatter và không chứa marker đánh giá.
+- Curator tạo 3 skill trong [skills/auto/](C:/Users/tuann/MyStorage/VinUniAI/Phase2/K4-DAY20-MULTIAGENTS-NguyenAnhTuan-2A202602700/skills/auto):
+  - [repo-rule-compliance/SKILL.md](C:/Users/tuann/MyStorage/VinUniAI/Phase2/K4-DAY20-MULTIAGENTS-NguyenAnhTuan-2A202602700/skills/auto/repo-rule-compliance/SKILL.md)
+  - [required-output-artifacts/SKILL.md](C:/Users/tuann/MyStorage/VinUniAI/Phase2/K4-DAY20-MULTIAGENTS-NguyenAnhTuan-2A202602700/skills/auto/required-output-artifacts/SKILL.md)
+  - [output-normalization-and-schema/SKILL.md](C:/Users/tuann/MyStorage/VinUniAI/Phase2/K4-DAY20-MULTIAGENTS-NguyenAnhTuan-2A202602700/skills/auto/output-normalization-and-schema/SKILL.md)
+- Cả 3 skill đều khá tổng quát, không cứng theo tên task.
+- Không phát hiện hướng dẫn có hại rõ ràng; các skill tập trung vào checklist output/schema/test.
+- Độ dài ngắn gọn (khoảng 10–11 bullet/skill), `description` bám đúng trigger.
+- Điều kiện `skills-auto`: có đọc skill ở **4/6 run** (2 run không đọc đều là run gặp recursion error).
 
-| Skill | Tổng quát hay riêng cho tác vụ học? | Đúng hay sai (nêu chỗ sai nếu có) | Độ dài, `description` và `skills_read` ở Phần 3.4 |
+## 7. Kết quả so sánh (dán từ `report/table.md`)
+
+| Task | baseline | subagents | skills-auto |
 |---|---|---|---|
-| `repo-rule-compliance` | Tổng quát | Đúng, tập trung vào checklist của repo, type hints, regression tests, changelog | 11 mục, `description` phù hợp cho task có quy tắc repo; chưa chắc đã được đọc trong lần run skills-auto vì `skills_read` = 0 trên dữ liệu thu được |
-| `required-output-artifacts` | Tổng quát | Đúng, nhấn mạnh output file, schema và metadata | 10 mục, rõ ràng; phù hợp cho tác vụ dữ liệu/logs |
-| `output-normalization-and-schema` | Tổng quát | Đúng, có trọng tâm rõ về chuẩn hóa và schema | 11 mục; phù hợp cho tasks xử lý dữ liệu/logs |
-
-## 7. Kết quả so sánh (Phần 4.3, 4.4)
-
-> Dữ liệu chính thức đầy đủ cho `report/table.md` và `check_breakdown.py` chưa được chạy xong vì các tác vụ thực thi bằng model DeepSeek tiếp tục gặp `GraphRecursionError` ở các điều kiện phức tạp. Dưới đây là các số liệu thu được từ các lần chạy có sẵn và các cảnh báo kỹ thuật.
-
-```text
-baseline      code-learn  score=6/10 tokens=134887 calls=22 25.7s
-baseline      data-learn  score=0/8 tokens=384245 calls=0 35.9s ERROR=GraphRecursionError
-baseline      logs-learn  score=6/9 tokens=204996 calls=15 19.1s
-subagents     code-learn  score=6/10 tokens=1283267 calls=50 264.8s
-subagents     data-learn  score=5/8 tokens=109114 calls=16 26.9s
-skills-auto   code-learn  score=8/10 tokens=440637 calls=0 64.3s ERROR=GraphRecursionError
-```
-
-Lần chạy `skills-auto` trên `code-learn` cho thấy skill tăng score từ 6/10 lên 8/10, nhưng vẫn bị lỗi `GraphRecursionError` sau đó; nên không thể kết luận “đã hoàn toàn ổn định” mà chỉ có thể nói skill cải thiện được một phần các check quy tắc.
+| code-learn | 6/10 | 7/10 | 8/10 |
+| data-learn | 0/8 | 5/8 | 5/8 |
+| logs-learn | 6/9 | 6/9 | 6/9 |
+| code-eval | 6/11 | 6/11 | 8/11 |
+| data-eval | 5/9 | 0/9 | 5/9 |
+| logs-eval | 6/10 | 6/10 | 6/10 |
+| **Mean score - learning tasks** | 0.42 | 0.66 | 0.70 |
+| **Mean score - evaluation tasks** | 0.57 | 0.38 | 0.63 |
+| **Mean tokens per run** | 302,538 | 514,675 | 351,065 |
+| **Runs that read a skill** | 0/6 | 0/6 | 4/6 |
 
 ## 8. Phân tích
 
-> Trả lời từng câu bằng số liệu từ mục 7 và bằng chứng từ vết. Kết quả âm hoặc không có khác biệt vẫn hợp lệ nếu được phân tích tốt.
+1. **Điều kiện cải thiện điểm**
+   - Tác vụ học: `subagents` (0.66) và `skills-auto` (0.70) đều cao hơn `baseline` (0.42).
+   - Tác vụ đánh giá: chỉ `skills-auto` cải thiện rõ (0.63 > 0.57), còn `subagents` giảm mạnh (0.38).
+   - Có trường hợp “cải thiện học nhưng không cải thiện đánh giá”: `subagents` → dấu hiệu thiếu ổn định/tổng quát hóa kém.
 
-1. So với `baseline`, điều kiện nào cải thiện điểm tác vụ **học**? Điều kiện nào cải thiện điểm tác vụ **đánh giá**? Có điều kiện nào cải thiện tác vụ học nhưng không cải thiện tác vụ đánh giá? Nếu có, đó là dấu hiệu gì?
-2. Tách điểm thành check kỹ thuật và check quy ước (`rule_`). Skill do curator sinh giúp nhóm check nào? Check quy ước **mới** của tác vụ đánh giá có được skill giúp không, và vì sao?
-3. Dựa vào vết và `skills_read`, giải thích một check mà skill giúp đạt và một check mà skill không giúp (skill chưa được đọc, đọc nhưng không làm theo, skill thiếu hoặc sai).
-4. Chi phí: so sánh số token trung bình giữa các điều kiện. Điều kiện nào có hiệu quả tốt nhất theo điểm trên mỗi token? Đa tác tử có đáng chi phí trong thí nghiệm này không?
-5. Có dấu hiệu rò rỉ dữ liệu hoặc quá khớp nào trong skill sinh ra không? Nhóm đã phòng tránh như thế nào?
-6. Nhiễu: so sánh điểm tác vụ học của cùng bộ skill ở Phần 3.4 (đã sao lưu) và sau đóng băng. Chênh lệch bao nhiêu? Nó cho biết điều gì về độ tin cậy của các chênh lệch trong bảng ở mục 7?
+2. **Tách kỹ thuật và quy ước**
+   - Theo `check_breakdown.py`:
+     - baseline/eval: kỹ thuật 17/18, quy ước 0/12.
+     - skills-auto/eval: kỹ thuật 17/18, quy ước 2/12.
+   - Skill sinh ra chủ yếu giúp nhóm **quy ước (`rule_`)**, ít tác động nhóm kỹ thuật vốn đã cao.
+
+3. **Một check được skill giúp và một check chưa được giúp**
+   - Được giúp: `code-learn: rule_type_hints` (baseline fail -> skills-auto pass), đồng thời run đó có `skills_read=3`.
+   - Chưa được giúp: `data-learn` ở skills-auto run có `skills_read=0` và `GraphRecursionError`, dẫn đến fail do thiếu artifact đầu ra.
+
+4. **Chi phí**
+   - Mean token/run: baseline 302,538; subagents 514,675; skills-auto 351,065.
+   - Hiệu quả điểm/token (xấp xỉ) cao nhất thuộc `skills-auto`, thấp nhất là `subagents`.
+   - Kết luận: đa tác tử **không đáng chi phí** trong cấu hình hiện tại.
+
+5. **Rò rỉ dữ liệu / quá khớp**
+   - Không thấy skill chứa tên task đánh giá hay đáp án cứng.
+   - Skill chỉ là quy tắc tổng quát (artifact/schema/checklist), nên rủi ro leakage thấp.
+   - Đã phòng tránh bằng: giữ nguyên output curator, không sửa tay nội dung trong [skills/auto/](C:/Users/tuann/MyStorage/VinUniAI/Phase2/K4-DAY20-MULTIAGENTS-NguyenAnhTuan-2A202602700/skills/auto), và kiểm tra `verify_freeze`.
+
+6. **Nhiễu**
+   - Điểm học của `skills-auto` trước/sau đóng băng giữ nguyên trung bình **0.70** (8/10, 5/8, 6/9), nhưng token dao động mạnh giữa các run.
+   - Điều này cho thấy với bộ task nhỏ, chênh lệch điểm nhỏ cần diễn giải thận trọng; chỉ score chưa phản ánh hết độ ổn định.
 
 ## 9. Hạn chế và tính hợp lệ
 
-> Nêu ít nhất 3 hạn chế và ảnh hưởng của từng hạn chế đến kết luận (ví dụ: chỉ 3 tác vụ mỗi vai trò, mỗi cấu hình chạy một lần, nhiễu của mô hình, tác vụ do giảng viên thiết kế sẵn quy ước, chỉ một mô hình).
-
-1.
-2.
-3.
+1. **Mỗi cấu hình-task chủ yếu một run chính thức**: khó ước lượng phương sai, nên kết luận về chênh lệch nhỏ có độ tin cậy hạn chế.
+2. **Nhiều run gặp `GraphRecursionError`**: ảnh hưởng trực tiếp đến điểm và token, làm nhiễu so sánh năng lực thực giữa điều kiện.
+3. **Chỉ dùng một mô hình (`deepseek-chat`)**: kết luận chưa chắc chuyển giao cho model khác hoặc backend khác.
+4. **Bộ task nhỏ (3 learn + 3 eval)**: chưa bao phủ đủ kiểu lỗi tác tử trong thực tế.
 
 ## 10. Kết luận
 
-> Tối đa 5 câu. Chỉ khẳng định điều số liệu hỗ trợ. Nêu một đề xuất cải tiến tiếp theo.
+Trong thí nghiệm này, `skills-auto` là điều kiện cân bằng tốt nhất giữa chất lượng và chi phí: tăng điểm cả ở tập học và tập đánh giá, đồng thời token thấp hơn nhiều so với `subagents`. `subagents` tăng điểm trên tập học nhưng giảm mạnh ở tập đánh giá và tốn token nhất. Lợi ích quan sát được của self-evolving skill chủ yếu nằm ở nhóm check quy ước/đầu ra. Tuy nhiên, lỗi recursion và số lần chạy ít khiến kết luận cần thận trọng. Bước tiếp theo nên lặp thêm nhiều seed/run (hướng 6e) để định lượng nhiễu trước khi chốt nhận định cuối.
 
 ## Phụ lục
 
-- Lệnh đã chạy (theo thứ tự):
-- Thử thách mở rộng (nếu có): hướng chọn, kết quả, nhận xét.
-- Ghi chú khác:
+- Lệnh đã chạy (theo thứ tự hoàn thiện):
+  - `pytest -q`
+  - `python -m lab.runner --condition subagents --tasks eval` (dừng do treo)
+  - `python -m lab.runner --condition skills-auto --tasks eval`
+  - `python -m lab.runner --condition subagents --tasks data-eval --recursion-limit 20`
+  - `python -m lab.runner --condition subagents --tasks logs-eval --recursion-limit 20`
+  - `python -X utf8 scripts/verify_freeze.py`
+  - `python -m lab.runner --condition skills-auto --tasks learn`
+  - `python -X utf8 scripts/verify_freeze.py` (OK)
+  - `python -m lab.compare | Out-File -FilePath report/table.md -Encoding utf8`
+  - `python scripts/check_breakdown.py`
+- Thử thách mở rộng: chưa thực hiện.
+- Ghi chú:
+  - Không chạy lặp lại các lệnh API đã có kết quả, trừ khi bắt buộc để đáp ứng quy tắc đóng băng (`skills-auto` learn trước freeze phải chạy lại).

@@ -1,0 +1,69 @@
+{
+  "task": "data-eval",
+  "condition": "baseline",
+  "role": "eval",
+  "score": 0.5555555555555556,
+  "passed": 5,
+  "total": 9,
+  "checks": [
+    {
+      "name": "march_revenue_utc",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "march_orders_utc",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "top_category",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "missing_total_orders",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "duplicate_events_removed",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "rule_money_in_cents",
+      "passed": false,
+      "detail": ""
+    },
+    {
+      "name": "rule_meta_block",
+      "passed": false,
+      "detail": ""
+    },
+    {
+      "name": "rule_clean_csv",
+      "passed": false,
+      "detail": ""
+    },
+    {
+      "name": "rule_sorted_keys_format",
+      "passed": false,
+      "detail": ""
+    }
+  ],
+  "tokens": {
+    "input": 182379,
+    "output": 5666,
+    "total": 188045
+  },
+  "tool_calls": 28,
+  "subagent_calls": 0,
+  "skills_read": 0,
+  "skills_modified": false,
+  "skills_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timestamp": "2026-10-06T10:21:18.732140+00:00",
+  "seconds": 40.0,
+  "final_message": "Done. `workspace/answer.json` now contains:\n\n```json\n{\n  \"march_revenue_utc\": 52957.19,\n  \"march_orders_utc\": 44,\n  \"top_category\": \"toys\",\n  \"missing_total_orders\": 7,\n  \"duplicate_events_removed\": 5\n}\n```\n\nHow I cleaned the data (88 raw events → 83 orders):\n\n- **De-duplication**: 5 order ids appeared twice (A-2006, A-2011, A-2026, A-2047, A-2058); the duplicates were byte-identical copies, so I kept the first occurrence of each id and dropped 5 events (`duplicate_events_removed = 5`).\n- **Categories**: normalised by stripping surrounding whitespace and lowercasing, which collapses `\" garden \"`, `Garden`, `GARDEN` → `garden` (same for books/music/toys). Whole-file revenue: toys 29,876.24 > garden 27,650.71 > music 21,923.27 > books 13,959.95 → `top_category = \"toys\"`.\n- **Totals**: parsed both numbers and comma-formatted strings (e.g. `\"2,160.33\"` → 2160.33). The sentinel `-1` marks unknown totals; 7 distinct orders had it, were excluded from every revenue figure (`missing_total_orders = 7`).\n- **March in UTC**: timestamps were converted from their offsets to UTC before taking the month. This matters for three boundary orders — A-3000 (`2024-02-29T20:00-05:00` → 1 Mar UTC, included), A-3001 (`2024-04-01T01:00+07:00` → 31 Mar UTC, included) and A-3002 (`2024-03-31T22:30-05:00` → 1 Apr UTC, excluded) — giving 44 March orders totalling 52,957.19.\n\nOne caveat: the task mentions extra fields \"the Acme reporting conventions require\", but no conventions document (or any other reference) exists anywhere in the sandbox — `workspace/` only holds `README.md` and `orders.json`. Since I couldn't determine those conventions, I wrote exactly the five specified keys rather than inventing fields; if you can point me to the conventions, I'll add what's missing. The only file I changed is `workspace/answer.json` (temp analysis scripts were removed).",
+  "error": null
+}
