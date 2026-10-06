@@ -92,7 +92,7 @@ pytest tests/test_01_provided.py
 Điền `.env` theo một trong hai cách (`model.py` ưu tiên cách 1 nếu cả ba biến của cách 1 đều có):
 
 1. **Azure OpenAI hoặc cổng tương thích OpenAI**: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_KEY`, `AZURE_OPENAI_DEPLOYMENT_MODEL`.
-2. **Nhà cung cấp khác** (ví dụ DeepSeek): `LAB_MODEL=deepseek:deepseek-chat` và `DEEPSEEK_API_KEY`. Tên mô hình thay đổi theo thời gian, đối chiếu tài liệu của nhà cung cấp.
+2. **Nhà cung cấp khác**: đặt `LAB_MODEL="<provider>:<model>"` và key tương ứng của nhà cung cấp theo chuẩn LangChain. Ví dụ với DeepSeek dùng `LAB_MODEL=deepseek:deepseek-chat` và `DEEPSEEK_API_KEY` (có thể cần cài thêm package tích hợp theo tài liệu của nhà cung cấp).
 
 Kết quả mong đợi của `pytest tests/test_01_provided.py`: `12 passed`. Không commit tệp `.env`.
 
